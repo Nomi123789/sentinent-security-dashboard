@@ -1,0 +1,5 @@
+{
+  "name": "Sentinel Security Dashboard",
+  "description": "Advanced threat detection and API security monitoring system with real-time intrusion detection, rate limiting, and security header enforcement.",
+  "requestFramePermissions": []
+}
