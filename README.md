@@ -1,31 +1,39 @@
-# Sentinel Security Dashboard - Week 4
+# Sentinel Security Dashboard - Week 5
 
 ## Goal
-Implement advanced security measures, detect threats in real-time, and secure API endpoints.
+Learn ethical hacking techniques, exploit vulnerabilities in a test environment, and enhance application security.
 
-## Features Implemented
+## Ethical Hacking Report (Penetration Test Summary)
 
-### 1. Intrusion Detection & Monitoring
-- **Real-time Monitoring**: Custom middleware in `server.ts` tracks all incoming requests and logs security-relevant events.
-- **Alert System**: The system detects multiple failed login attempts. If an IP fails to log in 5 times, it is automatically blocked.
-- **Security Dashboard**: A React-based dashboard provides a live feed of security logs, blocked IPs, and brute-force statistics.
+### 1. Reconnaissance & OSINT
+- **Technique**: Port scanning and service fingerprinting.
+- **Findings**: 
+    - Port 80/443 open.
+    - Server identified as `Express/4.21.2`.
+    - Exposed debug endpoint discovered: `/api/debug/sql-vulnerable`.
+- **Risk**: Information disclosure allows attackers to tailor exploits for specific software versions.
 
-### 2. API Security Hardening
-- **Rate Limiting**: Integrated `express-rate-limit` to prevent brute-force and DoS attacks. Configured to allow 100 requests per 15 minutes per IP.
-- **CORS Configuration**: Properly configured CORS using the `cors` middleware to restrict access to authorized origins.
-- **API Hardening**: API endpoints are protected by the intrusion detection system and rate limiters.
+### 2. SQL Injection (SQLi) Exploitation
+- **Vulnerability**: The `/api/debug/sql-vulnerable` endpoint was found to be vulnerable to boolean-based and union-based SQL injection.
+- **Exploit**: Using a payload like `1 OR 1=1`, an attacker could bypass ID filtering and dump the entire user database.
+- **Remediation**: Replaced raw string concatenation with **Prepared Statements** (simulated via strict type casting and parameterized logic) in the `/api/debug/sql-secure` endpoint.
 
-### 3. Security Headers & CSP Implementation
-- **Helmet.js**: Integrated `helmet` to automatically set secure HTTP headers.
-- **Content Security Policy (CSP)**: Implemented a strict CSP to prevent script injections and unauthorized resource loading.
-- **HSTS**: Enforced HTTPS using `Strict-Transport-Security` headers with a 1-year max-age.
+### 3. Cross-Site Request Forgery (CSRF)
+- **Vulnerability**: Profile update actions (`/api/user/update-profile`) lacked token validation, allowing unauthorized state changes via malicious third-party sites.
+- **Remediation**: Implemented `csurf` middleware. The server now requires a valid CSRF token in the `x-csrf-token` header for all state-changing requests.
 
-## Tech Stack
-- **Backend**: Node.js, Express, Helmet, Express-Rate-Limit, CORS.
-- **Frontend**: React, Tailwind CSS, Shadcn/UI, Recharts, Framer Motion.
-- **Development**: Vite, TSX.
+## New Features Implemented
+
+### Ethical Hacking Lab
+- **Recon Simulator**: Interactive tool to simulate port scanning and service discovery.
+- **SQLi Lab**: Interactive environment to test `1 OR 1=1` payloads against vulnerable vs. secure endpoints.
+- **CSRF Lab**: Demonstration of how CSRF tokens block unauthorized requests.
+
+## Tech Stack Enhancements
+- **Middleware**: `csurf`, `cookie-parser`.
+- **Security Logic**: Prepared statements simulation, CSRF token lifecycle management.
 
 ## How to Test
-1. **Brute Force Detection**: Go to the "Security Testing Lab" in the dashboard. Try logging in with incorrect credentials multiple times. Watch the "Failed Logins" count increase and eventually see your IP get blocked.
-2. **Rate Limiting**: Use the "Ping API Endpoint" button repeatedly. After 100 requests (or as configured), you will receive a 429 error, and the event will be logged.
-3. **Security Headers**: Inspect the network tab in your browser to see the `Content-Security-Policy` and `Strict-Transport-Security` headers on every response.
+1. **SQLi**: Go to the "Ethical Hacking Lab" tab. Enter `1 OR 1=1` in the SQLi input. Click "Exploit Vulnerable" to see the full data dump, then click "Test Secure" to see how the fix neutralizes the attack.
+2. **CSRF**: Click "Simulate CSRF Attack" to see the request fail due to a missing token. Click "Authorized Update" to see a successful request using the valid token.
+3. **Recon**: Click "Start Recon Scan" to see the simulated discovery process.

@@ -5,6 +5,8 @@ import rateLimit from 'express-rate-limit';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import cookieParser from 'cookie-parser';
+import csrf from 'csurf';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,6 +18,13 @@ async function startServer() {
   const securityLogs: any[] = [];
   const blockedIPs = new Set<string>();
   const failedAttempts: Record<string, number> = {};
+
+  // Mock Database for SQLi Demo
+  const mockUserDb = [
+    { id: 1, username: 'admin', email: 'admin@sentinel.io', role: 'superuser' },
+    { id: 2, username: 'analyst', email: 'analyst@sentinel.io', role: 'staff' },
+    { id: 3, username: 'guest', email: 'guest@example.com', role: 'viewer' }
+  ];
 
   // Helper to log security events
   const logSecurityEvent = (type: string, message: string, ip: string, severity: 'low' | 'medium' | 'high' = 'low') => {
@@ -76,10 +85,20 @@ async function startServer() {
   app.use(cors({
     origin: process.env.APP_URL || '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'x-csrf-token'],
+    credentials: true
   }));
 
   app.use(express.json());
+  app.use(cookieParser());
+
+  // --- 5. CSRF Protection ---
+  const csrfProtection = csrf({ cookie: true });
+  
+  // Endpoint to get CSRF token
+  app.get('/api/security/csrf-token', csrfProtection, (req, res) => {
+    res.json({ csrfToken: req.csrfToken() });
+  });
 
   // --- API Routes ---
 
@@ -114,6 +133,54 @@ async function startServer() {
     }
 
     res.status(401).json({ error: 'Invalid credentials' });
+  });
+
+  // --- SQL Injection Demo Endpoints ---
+
+  // VULNERABLE Endpoint (Simulated)
+  app.post('/api/debug/sql-vulnerable', (req, res) => {
+    const { userId } = req.body;
+    const ip = req.ip || 'unknown';
+
+    logSecurityEvent('SQLi Probe', `Vulnerable endpoint accessed with ID: ${userId}`, ip, 'medium');
+
+    // Simulation of: SELECT * FROM users WHERE id = ${userId}
+    // If userId is "1 OR 1=1", it would return all users
+    if (userId.toString().includes('OR') || userId.toString().includes('=')) {
+      logSecurityEvent('SQLi Attempt', 'Potential SQL Injection detected in debug endpoint', ip, 'high');
+      return res.json({ 
+        warning: 'VULNERABILITY EXPLOITED',
+        query: `SELECT * FROM users WHERE id = ${userId}`,
+        results: mockUserDb // Returns everything
+      });
+    }
+
+    const user = mockUserDb.find(u => u.id.toString() === userId.toString());
+    res.json({ results: user ? [user] : [] });
+  });
+
+  // SECURE Endpoint (Prepared Statements Simulation)
+  app.post('/api/debug/sql-secure', (req, res) => {
+    const { userId } = req.body;
+    
+    // Simulation of Prepared Statement: SELECT * FROM users WHERE id = ?
+    // The input is cast to a number, neutralizing injection
+    const safeId = parseInt(userId);
+    const user = mockUserDb.find(u => u.id === safeId);
+    
+    res.json({ 
+      results: user ? [user] : [],
+      method: 'Prepared Statement (Parameterized Query)'
+    });
+  });
+
+  // --- CSRF Demo Endpoint ---
+  app.post('/api/user/update-profile', csrfProtection, (req, res) => {
+    const { email } = req.body;
+    const ip = req.ip || 'unknown';
+    
+    logSecurityEvent('Profile Update', `User updated email to: ${email}`, ip, 'low');
+    res.json({ success: true, message: 'Profile updated securely with CSRF protection.' });
   });
 
   // Test Rate Limiting

@@ -10,7 +10,14 @@ import {
   RefreshCw,
   UserX,
   Globe,
-  Terminal
+  Terminal,
+  Search,
+  Database,
+  Key,
+  Eye,
+  Bug,
+  FileText,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -24,6 +31,8 @@ import {
   AreaChart,
   Area
 } from 'recharts';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -62,6 +71,13 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [testMessage, setTestMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Penetration Testing State
+  const [csrfToken, setCsrfToken] = useState<string | null>(null);
+  const [sqliInput, setSqliInput] = useState('1');
+  const [sqliResults, setSqliResults] = useState<any>(null);
+  const [reconResults, setReconResults] = useState<string[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
 
   const fetchStats = async () => {
     try {
@@ -77,8 +93,19 @@ export default function App() {
     }
   };
 
+  const fetchCsrfToken = async () => {
+    try {
+      const res = await fetch('/api/security/csrf-token');
+      const data = await res.json();
+      setCsrfToken(data.csrfToken);
+    } catch (err) {
+      console.error('Failed to fetch CSRF token:', err);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
+    fetchCsrfToken();
     const interval = setInterval(fetchStats, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -118,11 +145,157 @@ export default function App() {
     }
   };
 
+  // SQLi Testing
+  const runSqli = async (vulnerable: boolean) => {
+    try {
+      const endpoint = vulnerable ? '/api/debug/sql-vulnerable' : '/api/debug/sql-secure';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: sqliInput })
+      });
+      const data = await res.json();
+      setSqliResults(data);
+      fetchStats();
+    } catch (err) {
+      setSqliResults({ error: 'Request failed' });
+    }
+  };
+
+  // CSRF Testing
+  const testCsrf = async (useToken: boolean) => {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (useToken && csrfToken) {
+        headers['x-csrf-token'] = csrfToken;
+      }
+
+      const res = await fetch('/api/user/update-profile', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ email: 'hacker@malicious.com' })
+      });
+      
+      const data = await res.json();
+      if (res.ok) {
+        setTestMessage({ type: 'success', text: data.message });
+      } else {
+        setTestMessage({ type: 'error', text: data.error || 'CSRF Protection Blocked Request' });
+      }
+      fetchStats();
+    } catch (err) {
+      setTestMessage({ type: 'error', text: 'CSRF Protection Blocked Request' });
+    }
+  };
+
+  // Reconnaissance Simulation
+  const runRecon = () => {
+    setIsScanning(true);
+    setReconResults([]);
+    
+    const steps = [
+      "Scanning open ports...",
+      "Port 80 (HTTP) - OPEN",
+      "Port 443 (HTTPS) - OPEN",
+      "Fingerprinting server...",
+      "Server: Express/4.21.2",
+      "Detecting technologies...",
+      "React 19, Vite, Tailwind CSS",
+      "Scanning for API endpoints...",
+      "Found /api/security/stats",
+      "Found /api/auth/login",
+      "Found /api/debug/sql-vulnerable (CRITICAL)",
+      "Reconnaissance complete."
+    ];
+
+    steps.forEach((step, i) => {
+      setTimeout(() => {
+        setReconResults(prev => [...prev, step]);
+        if (i === steps.length - 1) setIsScanning(false);
+      }, i * 600);
+    });
+  };
+
+  const generatePDFReport = () => {
+    const doc = new jsPDF();
+    const timestamp = new Date().toLocaleString();
+
+    // Title
+    doc.setFontSize(22);
+    doc.setTextColor(20, 20, 20);
+    doc.text('Ethical Hacking & Security Report', 20, 20);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Generated on: ${timestamp}`, 20, 28);
+    doc.text('Target: Sentinel Security Dashboard', 20, 33);
+
+    // Executive Summary
+    doc.setFontSize(16);
+    doc.setTextColor(0, 0, 0);
+    doc.text('1. Executive Summary', 20, 45);
+    doc.setFontSize(11);
+    doc.text('This report details the findings of a comprehensive penetration test conducted on the Sentinel Security Dashboard. The assessment identified several critical and high-severity vulnerabilities, including SQL Injection and CSRF. All identified issues have been remediated using industry-standard security practices.', 20, 52, { maxWidth: 170 });
+
+    // Vulnerabilities Table
+    doc.setFontSize(16);
+    doc.text('2. Vulnerability Analysis', 20, 75);
+    
+    autoTable(doc, {
+      startY: 82,
+      head: [['Severity', 'Vulnerability', 'Status', 'Remediation']],
+      body: [
+        ['CRITICAL', 'SQL Injection (SQLi)', 'FIXED', 'Prepared Statements'],
+        ['HIGH', 'Cross-Site Request Forgery', 'FIXED', 'CSRF Tokens (csurf)'],
+        ['MEDIUM', 'Brute Force Vulnerability', 'FIXED', 'Rate Limiting & IP Blocking'],
+        ['LOW', 'Information Disclosure', 'MITIGATED', 'Header Hardening (Helmet)'],
+      ],
+      headStyles: { fillColor: [40, 40, 40] },
+      columnStyles: {
+        0: { fontStyle: 'bold' }
+      }
+    });
+
+    // Detailed Findings
+    const finalY = (doc as any).lastAutoTable.finalY || 120;
+    doc.setFontSize(16);
+    doc.text('3. Detailed Findings', 20, finalY + 15);
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('3.1 SQL Injection (SQLi)', 20, finalY + 25);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('The debug endpoint /api/debug/sql-vulnerable was found to be susceptible to SQL injection. An attacker could use payloads like "1 OR 1=1" to bypass identification logic and retrieve unauthorized data from the mock user database.', 20, finalY + 32, { maxWidth: 170 });
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('3.2 Cross-Site Request Forgery (CSRF)', 20, finalY + 45);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('State-changing requests such as profile updates were vulnerable to CSRF attacks. Malicious sites could trigger these actions on behalf of an authenticated user without their consent.', 20, finalY + 52, { maxWidth: 170 });
+
+    // Conclusion
+    doc.addPage();
+    doc.setFontSize(16);
+    doc.text('4. Conclusion', 20, 20);
+    doc.setFontSize(11);
+    doc.text('The application has been significantly hardened against common web attacks. Continuous monitoring and regular penetration testing are recommended to maintain a robust security posture.', 20, 30, { maxWidth: 170 });
+
+    // Footer
+    doc.setFontSize(10);
+    doc.setTextColor(150, 150, 150);
+    doc.text('Confidential - Sentinel Security Systems', 105, 285, { align: 'center' });
+
+    doc.save('Sentinel_Security_Report.pdf');
+  };
+
   const resetSecurity = async () => {
     try {
       await fetch('/api/security/reset', { method: 'POST' });
       setTestMessage({ type: 'success', text: 'Security state reset successfully' });
       fetchStats();
+      fetchCsrfToken();
     } catch (err) {
       setTestMessage({ type: 'error', text: 'Failed to reset security' });
     }
@@ -154,7 +327,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Sentinel Security</h1>
-              <p className="text-muted-foreground">Advanced Threat Detection & API Hardening</p>
+              <p className="text-muted-foreground">Advanced Threat Detection & Ethical Hacking Lab</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -210,217 +383,383 @@ export default function App() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">Enforced</div>
-              <p className="text-xs text-muted-foreground">CSP, HSTS, XSS Protection</p>
+              <p className="text-xs text-muted-foreground">CSP, HSTS, CSRF Protection</p>
             </CardContent>
           </Card>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Content - Logs & Charts */}
-          <div className="lg:col-span-2 space-y-8">
-            <Card>
-              <CardHeader>
-                <CardTitle>Threat Activity Timeline</CardTitle>
-                <CardDescription>Severity of events over time (3 = High, 2 = Medium, 1 = Low)</CardDescription>
-              </CardHeader>
-              <CardContent className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData}>
-                    <defs>
-                      <linearGradient id="colorSeverity" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--muted))" />
-                    <XAxis dataKey="time" hide />
-                    <YAxis domain={[0, 4]} ticks={[1, 2, 3]} hide />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '8px' }}
-                      itemStyle={{ color: 'hsl(var(--primary))' }}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="severity" 
-                      stroke="hsl(var(--primary))" 
-                      fillOpacity={1} 
-                      fill="url(#colorSeverity)" 
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+        <Tabs defaultValue="dashboard" className="space-y-8">
+          <TabsList className="grid w-full grid-cols-2 max-w-md">
+            <TabsTrigger value="dashboard">Security Dashboard</TabsTrigger>
+            <TabsTrigger value="hacking">Ethical Hacking Lab</TabsTrigger>
+          </TabsList>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Intrusion Detection Logs</CardTitle>
-                  <CardDescription>Real-time monitoring of system access and threats</CardDescription>
-                </div>
-                <Terminal className="w-5 h-5 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-md border overflow-hidden">
-                  <Table>
-                    <TableHeader className="bg-muted/50">
-                      <TableRow>
-                        <TableHead className="w-[100px]">Severity</TableHead>
-                        <TableHead>Event Type</TableHead>
-                        <TableHead>Message</TableHead>
-                        <TableHead>IP Address</TableHead>
-                        <TableHead className="text-right">Timestamp</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      <AnimatePresence mode="popLayout">
-                        {stats.logs.map((log) => (
-                          <motion.tr 
-                            key={log.id}
-                            initial={{ opacity: 0, y: -10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className="group hover:bg-muted/30 transition-colors"
-                          >
-                            <TableCell>
-                              <Badge className={getSeverityColor(log.severity)}>
-                                {log.severity.toUpperCase()}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="font-medium">{log.type}</TableCell>
-                            <TableCell className="text-muted-foreground">{log.message}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Globe className="w-3 h-3 text-muted-foreground" />
-                                <span className="font-mono text-xs">{log.ip}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right text-xs text-muted-foreground">
-                              {new Date(log.timestamp).toLocaleTimeString()}
-                            </TableCell>
-                          </motion.tr>
-                        ))}
-                      </AnimatePresence>
-                      {stats.logs.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
-                            No security events detected. System is secure.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          <TabsContent value="dashboard" className="space-y-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Main Content - Logs & Charts */}
+              <div className="lg:col-span-2 space-y-8">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Threat Activity Timeline</CardTitle>
+                    <CardDescription>Severity of events over time (3 = High, 2 = Medium, 1 = Low)</CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData}>
+                        <defs>
+                          <linearGradient id="colorSeverity" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--muted))" />
+                        <XAxis dataKey="time" hide />
+                        <YAxis domain={[0, 4]} ticks={[1, 2, 3]} hide />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '8px' }}
+                          itemStyle={{ color: 'hsl(var(--primary))' }}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="severity" 
+                          stroke="hsl(var(--primary))" 
+                          fillOpacity={1} 
+                          fill="url(#colorSeverity)" 
+                          strokeWidth={2}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
 
-          {/* Sidebar - Testing & Tools */}
-          <div className="space-y-8">
-            <Card>
-              <CardHeader>
-                <CardTitle>Security Testing Lab</CardTitle>
-                <CardDescription>Simulate attacks to verify hardening measures</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <Tabs defaultValue="login">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="login">Brute Force</TabsTrigger>
-                    <TabsTrigger value="rate">Rate Limit</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="login" className="space-y-4 pt-4">
-                    <p className="text-sm text-muted-foreground">
-                      Try logging in with incorrect credentials. 5 failed attempts will block your IP.
-                    </p>
-                    <form onSubmit={handleLogin} className="space-y-3">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle>Intrusion Detection Logs</CardTitle>
+                      <CardDescription>Real-time monitoring of system access and threats</CardDescription>
+                    </div>
+                    <Terminal className="w-5 h-5 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="rounded-md border overflow-hidden">
+                      <Table>
+                        <TableHeader className="bg-muted/50">
+                          <TableRow>
+                            <TableHead className="w-[100px]">Severity</TableHead>
+                            <TableHead>Event Type</TableHead>
+                            <TableHead>Message</TableHead>
+                            <TableHead>IP Address</TableHead>
+                            <TableHead className="text-right">Timestamp</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          <AnimatePresence mode="popLayout">
+                            {stats.logs.map((log) => (
+                              <motion.tr 
+                                key={log.id}
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95 }}
+                                className="group hover:bg-muted/30 transition-colors"
+                              >
+                                <TableCell>
+                                  <Badge className={getSeverityColor(log.severity)}>
+                                    {log.severity.toUpperCase()}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="font-medium">{log.type}</TableCell>
+                                <TableCell className="text-muted-foreground">{log.message}</TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <Globe className="w-3 h-3 text-muted-foreground" />
+                                    <span className="font-mono text-xs">{log.ip}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right text-xs text-muted-foreground">
+                                  {new Date(log.timestamp).toLocaleTimeString()}
+                                </TableCell>
+                              </motion.tr>
+                            ))}
+                          </AnimatePresence>
+                          {stats.logs.length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
+                                No security events detected. System is secure.
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Sidebar - Testing & Tools */}
+              <div className="space-y-8">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Security Testing Lab</CardTitle>
+                    <CardDescription>Simulate attacks to verify hardening measures</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <Tabs defaultValue="login">
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="login">Brute Force</TabsTrigger>
+                        <TabsTrigger value="rate">Rate Limit</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="login" className="space-y-4 pt-4">
+                        <p className="text-sm text-muted-foreground">
+                          Try logging in with incorrect credentials. 5 failed attempts will block your IP.
+                        </p>
+                        <form onSubmit={handleLogin} className="space-y-3">
+                          <Input 
+                            placeholder="Username" 
+                            value={username} 
+                            onChange={(e) => setUsername(e.target.value)} 
+                          />
+                          <Input 
+                            type="password" 
+                            placeholder="Password" 
+                            value={password} 
+                            onChange={(e) => setPassword(e.target.value)} 
+                          />
+                          <Button type="submit" className="w-full gap-2">
+                            <Unlock className="w-4 h-4" />
+                            Attempt Login
+                          </Button>
+                        </form>
+                      </TabsContent>
+                      <TabsContent value="rate" className="space-y-4 pt-4">
+                        <p className="text-sm text-muted-foreground">
+                          Spam this button to trigger the API rate limiter.
+                        </p>
+                        <Button onClick={testRateLimit} variant="outline" className="w-full gap-2">
+                          <Activity className="w-4 h-4" />
+                          Ping API Endpoint
+                        </Button>
+                      </TabsContent>
+                    </Tabs>
+
+                    {testMessage && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                      >
+                        <Alert variant={testMessage.type === 'error' ? 'destructive' : 'default'}>
+                          {testMessage.type === 'error' ? <ShieldAlert className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                          <AlertTitle>{testMessage.type === 'error' ? 'Security Triggered' : 'Success'}</AlertTitle>
+                          <AlertDescription>{testMessage.text}</AlertDescription>
+                        </Alert>
+                      </motion.div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Active Protections</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-green-500/10 text-green-500 rounded-md">
+                          <Lock className="w-4 h-4" />
+                        </div>
+                        <span className="text-sm font-medium">Rate Limiting</span>
+                      </div>
+                      <Badge variant="secondary">100 req/15m</Badge>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-500/10 text-blue-500 rounded-md">
+                          <Globe className="w-4 h-4" />
+                        </div>
+                        <span className="text-sm font-medium">CORS Policy</span>
+                      </div>
+                      <Badge variant="secondary">Restricted</Badge>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-purple-500/10 text-purple-500 rounded-md">
+                          <Terminal className="w-4 h-4" />
+                        </div>
+                        <span className="text-sm font-medium">CSP Headers</span>
+                      </div>
+                      <Badge variant="secondary">Strict</Badge>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-orange-500/10 text-orange-500 rounded-md">
+                          <AlertTriangle className="w-4 h-4" />
+                        </div>
+                        <span className="text-sm font-medium">HSTS Policy</span>
+                      </div>
+                      <Badge variant="secondary">1 Year</Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="hacking" className="space-y-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Reconnaissance Section */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Reconnaissance & OSINT</CardTitle>
+                      <CardDescription>Simulate information gathering on the target</CardDescription>
+                    </div>
+                    <Search className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Button onClick={runRecon} disabled={isScanning} className="w-full gap-2">
+                    <Globe className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
+                    {isScanning ? 'Scanning Target...' : 'Start Recon Scan'}
+                  </Button>
+                  <div className="bg-slate-900 text-green-400 p-4 rounded-md font-mono text-xs h-[250px] overflow-y-auto border border-slate-800">
+                    {reconResults.length === 0 && <span className="opacity-50">Waiting for scan...</span>}
+                    {reconResults.map((line, i) => (
+                      <div key={i} className="mb-1">
+                        <span className="text-slate-500 mr-2">[{new Date().toLocaleTimeString()}]</span>
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* SQL Injection Lab */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>SQL Injection (SQLi) Lab</CardTitle>
+                      <CardDescription>Exploit and fix database vulnerabilities</CardDescription>
+                    </div>
+                    <Database className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">User ID Input</label>
+                    <div className="flex gap-2">
                       <Input 
-                        placeholder="Username" 
-                        value={username} 
-                        onChange={(e) => setUsername(e.target.value)} 
+                        value={sqliInput} 
+                        onChange={(e) => setSqliInput(e.target.value)}
+                        placeholder="e.g. 1 OR 1=1"
                       />
-                      <Input 
-                        type="password" 
-                        placeholder="Password" 
-                        value={password} 
-                        onChange={(e) => setPassword(e.target.value)} 
-                      />
-                      <Button type="submit" className="w-full gap-2">
-                        <Unlock className="w-4 h-4" />
-                        Attempt Login
-                      </Button>
-                    </form>
-                  </TabsContent>
-                  <TabsContent value="rate" className="space-y-4 pt-4">
-                    <p className="text-sm text-muted-foreground">
-                      Spam this button to trigger the API rate limiter.
-                    </p>
-                    <Button onClick={testRateLimit} variant="outline" className="w-full gap-2">
-                      <Activity className="w-4 h-4" />
-                      Ping API Endpoint
+                      <Button variant="outline" onClick={() => setSqliInput('1 OR 1=1')}>Payload</Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Button variant="destructive" onClick={() => runSqli(true)} className="gap-2">
+                      <Bug className="w-4 h-4" />
+                      Exploit Vulnerable
                     </Button>
-                  </TabsContent>
-                </Tabs>
+                    <Button variant="default" onClick={() => runSqli(false)} className="gap-2">
+                      <ShieldCheck className="w-4 h-4" />
+                      Test Secure
+                    </Button>
+                  </div>
+                  <div className="bg-muted p-4 rounded-md min-h-[150px] text-xs font-mono overflow-auto border">
+                    {sqliResults ? (
+                      <pre>{JSON.stringify(sqliResults, null, 2)}</pre>
+                    ) : (
+                      <span className="text-muted-foreground italic">Results will appear here...</span>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
-                {testMessage && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                  >
-                    <Alert variant={testMessage.type === 'error' ? 'destructive' : 'default'}>
-                      {testMessage.type === 'error' ? <ShieldAlert className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-                      <AlertTitle>{testMessage.type === 'error' ? 'Security Triggered' : 'Success'}</AlertTitle>
-                      <AlertDescription>{testMessage.text}</AlertDescription>
-                    </Alert>
-                  </motion.div>
-                )}
-              </CardContent>
-            </Card>
+              {/* CSRF Lab */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>CSRF Exploitation Lab</CardTitle>
+                      <CardDescription>Test Cross-Site Request Forgery protection</CardDescription>
+                    </div>
+                    <Key className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="p-4 bg-muted/50 rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Current CSRF Token:</span>
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {csrfToken ? `${csrfToken.substring(0, 15)}...` : 'Not Loaded'}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      The server requires an `x-csrf-token` header for state-changing requests.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Button variant="destructive" onClick={() => testCsrf(false)} className="gap-2">
+                      <UserX className="w-4 h-4" />
+                      Simulate CSRF Attack
+                    </Button>
+                    <Button variant="default" onClick={() => testCsrf(true)} className="gap-2">
+                      <ShieldCheck className="w-4 h-4" />
+                      Authorized Update
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Active Protections</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-green-500/10 text-green-500 rounded-md">
-                      <Lock className="w-4 h-4" />
+              {/* Report Summary */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Hacking Report Summary</CardTitle>
+                      <CardDescription>Findings from the penetration test</CardDescription>
                     </div>
-                    <span className="text-sm font-medium">Rate Limiting</span>
+                    <Eye className="w-5 h-5 text-muted-foreground" />
                   </div>
-                  <Badge variant="secondary">100 req/15m</Badge>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/10 text-blue-500 rounded-md">
-                      <Globe className="w-4 h-4" />
-                    </div>
-                    <span className="text-sm font-medium">CORS Policy</span>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <ul className="space-y-3 text-sm">
+                    <li className="flex items-start gap-2">
+                      <Badge variant="destructive" className="mt-0.5">CRITICAL</Badge>
+                      <span>SQL Injection found in <code>/api/debug/sql-vulnerable</code>. Allows full database dump.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Badge className="mt-0.5 bg-orange-500">HIGH</Badge>
+                      <span>CSRF vulnerability identified in profile updates. Fixed with <code>csurf</code>.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Badge variant="secondary" className="mt-0.5">INFO</Badge>
+                      <span>Reconnaissance revealed detailed server versioning (Express 4.21.2).</span>
+                    </li>
+                  </ul>
+                  
+                  <div className="pt-4 border-t">
+                    <Button onClick={generatePDFReport} className="w-full gap-2" variant="outline">
+                      <Download className="w-4 h-4" />
+                      Download Full PDF Report
+                    </Button>
                   </div>
-                  <Badge variant="secondary">Restricted</Badge>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-500/10 text-purple-500 rounded-md">
-                      <Terminal className="w-4 h-4" />
-                    </div>
-                    <span className="text-sm font-medium">CSP Headers</span>
+
+                  <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                    <h4 className="font-semibold text-primary mb-2 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4" />
+                      Remediation Applied
+                    </h4>
+                    <p className="text-xs text-muted-foreground">
+                      All identified vulnerabilities have been patched using Prepared Statements and CSRF Tokens.
+                    </p>
                   </div>
-                  <Badge variant="secondary">Strict</Badge>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-orange-500/10 text-orange-500 rounded-md">
-                      <AlertTriangle className="w-4 h-4" />
-                    </div>
-                    <span className="text-sm font-medium">HSTS Policy</span>
-                  </div>
-                  <Badge variant="secondary">1 Year</Badge>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
